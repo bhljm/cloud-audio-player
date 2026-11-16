@@ -35,6 +35,8 @@
     .primary:hover:not(:disabled) { background:var(--primary-dark); }
     .secondary { width:52px; height:52px; border-radius:17px; background:var(--soft); color:var(--primary-dark); display:grid;place-items:center; }
     .secondary:hover:not(:disabled) { background:#dce9fb; }
+    .danger { width:52px; height:52px; border-radius:17px; background:#fcecee; color:#b44a56; display:grid;place-items:center; }
+    .danger:hover:not(:disabled) { background:#f8dde1; }
     .settings { border-top:1px solid var(--line); padding-top:21px; display:grid; grid-template-columns:1fr 1fr; gap:18px 26px; }
     .setting-label { display:flex; align-items:center; gap:7px; color:#495a70; font-size:14px; font-weight:700; margin-bottom:13px; }
     .volume-line { display:flex; align-items:center; gap:10px; }
@@ -50,6 +52,48 @@
     .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
     @media(max-width:440px) { .settings { grid-template-columns:1fr; gap:18px; } .wrap { width:min(100% - 22px,660px); } .card { border-radius:20px; } }
     @media(prefers-reduced-motion:reduce) { * {transition:none!important;} }
+
+    /* v1.0 小幅精緻版：以下僅調整外觀，不更動播放器控制邏輯 */
+    body { background:radial-gradient(ellipse at 14% 0%,#dce9f9 0,transparent 43%),radial-gradient(ellipse at 100% 0%,#e8edfb 0,transparent 35%),#eef3f9; }
+    .wrap { padding-top:clamp(19px,4vh,43px); }
+    header { margin-bottom:17px; }
+    .brand-icon { background:linear-gradient(145deg,#d9e9fc,#edf4ff); box-shadow:inset 0 0 0 1px #d2e1f3; }
+    .card { border-color:#dbe6f2; box-shadow:0 14px 42px rgba(40,65,100,.095),0 3px 11px rgba(40,65,100,.045); }
+    .art { width:82px; height:82px; border-radius:24px; margin-bottom:15px; background:linear-gradient(145deg,#dbeafe,#eef4ff 72%); box-shadow:inset 0 0 0 1px #d9e8fa; }
+    .art svg { width:41px; height:41px; }
+    h1 { margin-bottom:14px; }
+    .status { width:max-content; max-width:100%; min-height:32px; margin:0 auto 18px; padding:5px 13px; border:1px solid #dbe5f0; background:#f1f5fa; border-radius:999px; color:#586f88; font-size:13px; font-weight:700; }
+    .status.success { background:#e3f5ed; border-color:#b8e4d0; color:#197951; }
+    .status.success .dot { background:#22a26b; box-shadow:0 0 0 3px #c6ebd9; }
+    .status.error { background:#fff0f1; border-color:#f0c6cb; color:#aa4050; }
+    .status.error .dot { background:#bd4755; }
+    .timeline { accent-color:#3e79c6; }
+    .controls { gap:15px; margin:18px 0 22px; }
+    .primary { background:linear-gradient(155deg,#518bda,#356db7); box-shadow:0 9px 18px rgba(53,109,183,.20); }
+    .primary:hover:not(:disabled) { background:linear-gradient(155deg,#467fd0,#2e60a3); }
+    .secondary { background:#eaf1fa; color:#34679f; }
+    .secondary:hover:not(:disabled) { background:#dce9f9; }
+    .danger { background:#fbe7e9; color:#b63e4d; }
+    .danger:hover:not(:disabled) { background:#f7d5d9; }
+    .settings { border-top:1px solid #e5edf6; padding-top:18px; gap:12px; }
+    .settings > div { min-width:0; border:1px solid #e0eaf5; border-radius:15px; background:linear-gradient(145deg,#f3f7fd,#eaf1fa); padding:13px 15px; }
+    .setting-label { color:#435b77; font-size:13px; margin-bottom:9px; }
+    .volume-line { gap:8px; }
+    .volume-line svg { flex-shrink:0; width:21px; height:21px; color:#477aaf; }
+    .volume-line input { accent-color:#477fca; }
+    .value { color:#355d8a; font-weight:750; }
+    select { background:#fff; min-height:39px; border-color:#d1e0f1; font-size:14px; }
+    footer { margin-top:15px; }
+    @media(max-width:440px) {
+      .wrap { padding-top:17px; }
+      header { margin-bottom:13px; }
+      .card { padding:21px 17px; }
+      .art { width:74px; height:74px; margin-bottom:12px; }
+      h1 { font-size:23px; }
+      .settings { grid-template-columns:1fr; gap:10px; }
+      .settings > div { padding:11px 13px; }
+      .controls { gap:13px; }
+    }
   </style>
 </head>
 <body>
@@ -69,7 +113,7 @@
     <div class="controls">
       <button type="button" class="secondary" id="restart" aria-label="從頭播放" title="從頭播放" disabled><svg viewBox="0 0 24 24"><path d="M3 11a9 9 0 1 1 2.6 6.4"/><path d="M3 4v7h7"/></svg></button>
       <button type="button" class="primary" id="play" aria-label="播放" title="播放" disabled><svg id="playIcon" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z" fill="currentColor" stroke="none"/></svg></button>
-      <button type="button" class="secondary" id="stop" aria-label="停止並歸零" title="停止並歸零" disabled><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg></button>
+      <button type="button" class="danger" id="stop" aria-label="停止播放並歸零" title="停止播放（歸零）" disabled><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg></button>
     </div>
     <div class="settings">
       <div>
