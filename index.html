@@ -94,6 +94,15 @@
       .settings > div { padding:11px 13px; }
       .controls { gap:13px; }
     }
+
+    /* 多音檔選單：沿用目前小幅精緻版的視覺語言 */
+    .track-box { border:1px solid #dbe6f3; border-radius:15px; background:linear-gradient(145deg,#f5f8fd,#edf3fa); padding:12px 15px; margin:0 0 20px; }
+    .track-box .setting-label { margin-bottom:7px; }
+    .track-box select { background:#fff; border-color:#cbdbef; font-weight:650; min-height:44px; }
+    .track-box select:disabled { color:#8493a7; cursor:wait; }
+    .track-note { display:none; margin:9px 1px 0; font-size:12px; line-height:1.5; color:#64748b; }
+    .track-note.show { display:block; }
+    @media(max-width:440px) { .track-box { margin-bottom:16px; padding:11px 13px; } }
   </style>
 </head>
 <body>
@@ -105,8 +114,13 @@
   <section class="card" aria-label="音檔播放器">
     <div class="art" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></div>
     <h1>音檔播放</h1>
+    <div class="track-box">
+      <label for="track" class="setting-label">選擇播放音檔</label>
+      <select id="track" disabled aria-label="選擇播放音檔"><option value="">正在搜尋音檔…</option></select>
+      <p id="trackNote" class="track-note" role="status"></p>
+    </div>
     <div class="status" id="status" role="status" aria-live="polite"><span class="dot"></span><span id="statusText">準備載入音檔…</span></div>
-    <audio id="audio" preload="metadata" src="./audio.mp3"></audio>
+    <audio id="audio" preload="metadata"></audio>
     <label for="seek" class="sr-only">播放進度</label>
     <input id="seek" class="timeline" type="range" min="0" max="1000" value="0" disabled aria-label="播放進度">
     <div class="times"><span id="current">00:00</span><span id="duration">00:00</span></div>
@@ -129,7 +143,13 @@
 <script>
 (() => {
   'use strict';
+  // 只要在 GitHub Pages 同一資料夾放 audio1.mp3、audio2.mp3... 即可。
+  // 若超過 20 個檔案，可提高 MAX_TRACKS；不檢查 GitHub API、不需帳密。
+  const MAX_TRACKS = 20;
+  const CHECK_WORKERS = 5;
   const audio = document.querySelector('#audio');
+  const track = document.querySelector('#track');
+  const trackNote = document.querySelector('#trackNote');
   const play = document.querySelector('#play');
   const playIcon = document.querySelector('#playIcon');
   const restart = document.querySelector('#restart');
@@ -148,76 +168,205 @@
   let hasMetadata = false;
   let seeking = false;
   let fatalError = false;
+  let selectedFile = '';
+
   function formatTime(sec) {
     if (!Number.isFinite(sec) || sec < 0) return '00:00';
     const s = Math.floor(sec);
-    const pad = n => String(n).padStart(2,'0');
-    return s >= 3600 ? `${Math.floor(s/3600)}:${pad(Math.floor(s%3600/60))}:${pad(s%60)}` : `${pad(Math.floor(s/60))}:${pad(s%60)}`;
+    const pad = n => String(n).padStart(2, '0');
+    return s >= 3600
+      ? `${Math.floor(s / 3600)}:${pad(Math.floor(s % 3600 / 60))}:${pad(s % 60)}`
+      : `${pad(Math.floor(s / 60))}:${pad(s % 60)}`;
   }
-  function setStatus(text, kind='') { status.className=`status ${kind}`; statusText.textContent=text; }
-  function showError(text) { message.textContent=text; message.classList.add('show'); setStatus('音檔無法播放','error'); }
-  function clearError() { message.classList.remove('show'); message.textContent=''; }
+  function setStatus(text, kind = '') {
+    status.className = `status ${kind}`;
+    statusText.textContent = text;
+  }
+  function showError(text) {
+    message.textContent = text;
+    message.classList.add('show');
+    setStatus('音檔無法播放', 'error');
+  }
+  function clearError() {
+    message.classList.remove('show');
+    message.textContent = '';
+  }
+  function note(text) {
+    trackNote.textContent = text;
+    trackNote.classList.toggle('show', Boolean(text));
+  }
   function updateUI() {
     const playing = !audio.paused && !audio.ended;
     playIcon.innerHTML = playing ? PAUSE : PLAY;
-    play.setAttribute('aria-label',playing?'暫停':'播放');
-    play.title = playing?'暫停':'播放';
-    if (!fatalError && hasMetadata) setStatus(playing?'播放中':audio.ended?'播放完畢':'準備就緒',playing?'success':'');
+    play.setAttribute('aria-label', playing ? '暫停' : '播放');
+    play.title = playing ? '暫停' : '播放';
+    if (!fatalError && hasMetadata) {
+      setStatus(playing ? '播放中' : audio.ended ? '播放完畢' : '準備就緒', playing ? 'success' : '');
+    }
   }
   function updateProgress() {
-    current.textContent=formatTime(audio.currentTime);
-    if (!seeking && Number.isFinite(audio.duration) && audio.duration>0) seek.value=String(Math.round(audio.currentTime/audio.duration*1000));
+    current.textContent = formatTime(audio.currentTime);
+    if (!seeking && Number.isFinite(audio.duration) && audio.duration > 0) {
+      seek.value = String(Math.round(audio.currentTime / audio.duration * 1000));
+    }
   }
-  audio.volume=Number(volume.value)/100;
-  audio.playbackRate=Number(speed.value);
-  audio.addEventListener('loadedmetadata',() => {
-    fatalError=false; hasMetadata=true; clearError();
-    const finite=Number.isFinite(audio.duration)&&audio.duration>0;
-    duration.textContent=finite?formatTime(audio.duration):'--:--';
-    seek.disabled=!finite; play.disabled=false; restart.disabled=false; stop.disabled=false;
-    updateProgress(); updateUI();
+  function resetTrackUI() {
+    hasMetadata = false;
+    fatalError = false;
+    seeking = false;
+    current.textContent = '00:00';
+    duration.textContent = '00:00';
+    seek.value = '0';
+    seek.disabled = true;
+    play.disabled = true;
+    restart.disabled = true;
+    stop.disabled = true;
+    playIcon.innerHTML = PLAY;
+    play.title = '播放';
+    play.setAttribute('aria-label', '播放');
+    clearError();
+  }
+  function changeTrack(filename) {
+    if (!filename || filename === selectedFile) return;
+    audio.pause();
+    resetTrackUI();
+    selectedFile = filename;
+    setStatus('正在載入音檔…');
+    // 改變 src 即中止舊音檔下載，不會同時載入多個完整音檔。
+    audio.src = `./${filename}`;
+    audio.load();
+  }
+
+  // 用 HEAD 只探測檔案是否存在，不讀取音檔本身。
+  // GitHub Pages 支援 HEAD；失敗的連線不視為檔案不存在。
+  async function exists(number) {
+    const filename = `audio${number}.mp3`;
+    try {
+      const res = await fetch(`./${filename}`, { method: 'HEAD', cache: 'no-store' });
+      return { number, filename, exists: res.ok, networkError: false };
+    } catch (_) {
+      return { number, filename, exists: false, networkError: true };
+    }
+  }
+  async function discoverTracks() {
+    setStatus('正在搜尋音檔…');
+    const results = new Array(MAX_TRACKS);
+    let next = 1;
+    async function worker() {
+      while (next <= MAX_TRACKS) {
+        const index = next++;
+        results[index - 1] = await exists(index);
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(CHECK_WORKERS, MAX_TRACKS) }, worker));
+    const found = results.filter(item => item.exists);
+    const errors = results.filter(item => item.networkError);
+    track.replaceChildren();
+    if (!found.length) {
+      const option = new Option('沒有找到可播放音檔', '');
+      track.add(option);
+      track.disabled = true;
+      resetTrackUI();
+      const cause = errors.length ? '網路檢查失敗，請確認連線後重新整理。' : '請上傳 audio1.mp3、audio2.mp3… 到與 index.html 相同的資料夾。';
+      showError(cause);
+      return;
+    }
+    for (const item of found) track.add(new Option(`音檔 ${item.number}`, item.filename));
+    track.disabled = false;
+    // audio1.mp3 優先；若缺少 audio1，退而選擇數字最小的現有檔案。
+    const first = found.find(item => item.number === 1) || found[0];
+    track.value = first.filename;
+    note(errors.length ? '部分音檔暫時無法檢查，重新整理可重試。' : '');
+    changeTrack(first.filename);
+  }
+
+  audio.volume = Number(volume.value) / 100;
+  audio.playbackRate = Number(speed.value);
+  audio.addEventListener('loadedmetadata', () => {
+    fatalError = false;
+    hasMetadata = true;
+    clearError();
+    const finite = Number.isFinite(audio.duration) && audio.duration > 0;
+    duration.textContent = finite ? formatTime(audio.duration) : '--:--';
+    seek.disabled = !finite;
+    play.disabled = false;
+    restart.disabled = false;
+    stop.disabled = false;
+    updateProgress();
+    updateUI();
   });
-  audio.addEventListener('durationchange',() => {
-    const finite=Number.isFinite(audio.duration)&&audio.duration>0;
-    duration.textContent=finite?formatTime(audio.duration):'--:--';
-    seek.disabled=!finite;
+  audio.addEventListener('durationchange', () => {
+    if (!hasMetadata) return;
+    const finite = Number.isFinite(audio.duration) && audio.duration > 0;
+    duration.textContent = finite ? formatTime(audio.duration) : '--:--';
+    seek.disabled = !finite;
   });
-  audio.addEventListener('timeupdate',updateProgress);
-  audio.addEventListener('play',updateUI);
-  audio.addEventListener('pause',updateUI);
-  audio.addEventListener('ended',updateUI);
-  audio.addEventListener('waiting',() => { if(!fatalError && !audio.paused) setStatus('載入音訊中…'); });
-  audio.addEventListener('playing',updateUI);
-  audio.addEventListener('error',() => {
-    fatalError=true; hasMetadata=false;
-    play.disabled=true; restart.disabled=true; stop.disabled=true; seek.disabled=true;
-    const code=audio.error?.code;
-    const note=code===4?'瀏覽器不支援此音檔格式，或音檔無法載入。':'音檔可能不存在、尚未上傳完成，或網路連線中斷。';
-    showError(`${note}\n請確認網站根目錄有 audio.mp3，並且檔名大小寫完全相同。若剛更換音檔，請重新整理網頁。`);
+  audio.addEventListener('timeupdate', updateProgress);
+  audio.addEventListener('play', updateUI);
+  audio.addEventListener('pause', updateUI);
+  audio.addEventListener('ended', updateUI);
+  audio.addEventListener('waiting', () => {
+    if (!fatalError && !audio.paused) setStatus('載入音訊中…');
+  });
+  audio.addEventListener('playing', updateUI);
+  audio.addEventListener('error', () => {
+    if (!selectedFile) return;
+    fatalError = true;
+    hasMetadata = false;
+    play.disabled = true;
+    restart.disabled = true;
+    stop.disabled = true;
+    seek.disabled = true;
+    const code = audio.error?.code;
+    const cause = code === 4 ? '音檔格式不受支援，或無法載入。' : '音檔可能剛更新、暫時無法存取，或網路連線中斷。';
+    showError(`${cause}\n請檢查 ${selectedFile}，然後重新整理網頁。`);
   });
   async function tryPlay() {
     clearError();
-    try { await audio.play(); }
-    catch(e) {
-      if (!fatalError) { showError('瀏覽器無法啟動播放。請再按一次播放，或確認音檔格式與網路連線。'); updateUI(); }
+    try {
+      await audio.play();
+    } catch (e) {
+      // 使用者切換音檔時，瀏覽器會中止舊 play()；這不是播放故障。
+      if (e?.name === 'AbortError') return;
+      if (!fatalError) {
+        showError('無法開始播放。請再次按下播放，或檢查音檔與網路連線。');
+      }
     }
   }
-  play.addEventListener('click',()=>{ if(audio.paused) tryPlay(); else audio.pause(); });
-  restart.addEventListener('click',()=>{ if(hasMetadata) { audio.currentTime=0; if(audio.paused) tryPlay(); } });
-  stop.addEventListener('click',()=>{ audio.pause(); if(hasMetadata && Number.isFinite(audio.duration)) audio.currentTime=0; updateProgress(); updateUI(); });
-  seek.addEventListener('input',()=>{
-    if (!hasMetadata || !Number.isFinite(audio.duration) || audio.duration<=0) return;
-    seeking=true;
-    current.textContent=formatTime(Number(seek.value)/1000*audio.duration);
+  track.addEventListener('change', () => changeTrack(track.value));
+  play.addEventListener('click', () => {
+    if (audio.paused) tryPlay();
+    else audio.pause();
   });
-  seek.addEventListener('change',()=>{
-    if (hasMetadata && Number.isFinite(audio.duration) && audio.duration>0) audio.currentTime=Number(seek.value)/1000*audio.duration;
-    seeking=false; updateProgress();
+  restart.addEventListener('click', () => {
+    if (!hasMetadata) return;
+    audio.currentTime = 0;
+    if (audio.paused) tryPlay();
   });
-  volume.addEventListener('input',()=>{ audio.volume=Number(volume.value)/100; volumeValue.textContent=`${volume.value}%`; });
-  speed.addEventListener('change',()=>{ audio.playbackRate=Number(speed.value); });
-  // 音檔由相對路徑載入；不使用 Google Drive 外連、第三方腳本或集中播放控制。
-  // 未放 audio.mp3 時會提示錯誤；部署後請確認檔案可公開讀取。
+  stop.addEventListener('click', () => {
+    audio.pause();
+    if (hasMetadata && Number.isFinite(audio.duration)) audio.currentTime = 0;
+    updateProgress();
+    updateUI();
+  });
+  seek.addEventListener('input', () => {
+    if (!hasMetadata || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
+    seeking = true;
+    current.textContent = formatTime(Number(seek.value) / 1000 * audio.duration);
+  });
+  seek.addEventListener('change', () => {
+    if (hasMetadata && Number.isFinite(audio.duration) && audio.duration > 0) {
+      audio.currentTime = Number(seek.value) / 1000 * audio.duration;
+    }
+    seeking = false;
+    updateProgress();
+  });
+  volume.addEventListener('input', () => {
+    audio.volume = Number(volume.value) / 100;
+    volumeValue.textContent = `${volume.value}%`;
+  });
+  speed.addEventListener('change', () => { audio.playbackRate = Number(speed.value); });
+  discoverTracks();
 })();
 </script>
 </body>
